@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"google.golang.org/grpc/reflection"
 	"net"
 )
 
@@ -73,9 +74,13 @@ func main() {
 	gs := grpc.NewServer()
 	proto.RegisterUserProviderServer(gs, s)
 	logger.Info("grpc test server is now running...")
-	err = gs.Serve(l)
-	if err != nil {
+
+	// pi registers the server reflection service on gRPC server
+	reflection.Register(gs)
+
+	if err := gs.Serve(l); err != nil {
 		panic(err)
+		//logger.Errorf("failed to serve: %v", err)
 	}
 }
 

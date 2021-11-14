@@ -20,6 +20,7 @@ package grpcproxy
 import (
 	"errors"
 	"fmt"
+	"github.com/jhump/protoreflect/grpcreflect"
 	"io"
 	"io/ioutil"
 	stdHttp "net/http"
@@ -128,6 +129,12 @@ func getServiceAndMethod(path string) (string, string) {
 	return svc, mth
 }
 
+var reflection = true
+//var cc *grpc.ClientConn
+var refClient *grpcreflect.Client
+
+
+
 // Handle use the default http to grpc transcoding strategy https://cloud.google.com/endpoints/docs/grpc/transcoding
 func (f *Filter) Handle(c *http.HttpContext) {
 	svc, mth := getServiceAndMethod(c.GetUrl())
@@ -208,6 +215,22 @@ func (f *Filter) Handle(c *http.HttpContext) {
 
 	md = metadata.MD{}
 	t := metadata.MD{}
+
+
+	//if reflection {
+	//	//md := grpcurl.MetadataFromHeaders(append(addlHeaders, reflHeaders...))
+	//	//refCtx := metadata.NewOutgoingContext(ctx, md)
+	//	//cc = dial()
+	//	refClient = grpcreflect.NewClient(c.Ctx, reflectpb.NewServerReflectionClient(clientConn))
+	//	reflSource := grpcurl.DescriptorSourceFromServer(ctx, refClient)
+	//	if fileSource != nil {
+	//		descSource = compositeSource{reflSource, fileSource}
+	//	} else {
+	//		descSource = reflSource
+	//	}
+	//} else {
+	//	descSource = fileSource
+	//}
 
 	resp, err := Invoke(ctx, stub, mthDesc, grpcReq, grpc.Header(&md), grpc.Trailer(&t))
 	// judge err is server side error or not
