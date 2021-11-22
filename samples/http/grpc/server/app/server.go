@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"google.golang.org/grpc/reflection"
 	"net"
 )
@@ -44,6 +45,21 @@ const (
 type server struct {
 	users map[int32]*proto.User
 	proto.UnimplementedUserProviderServer
+}
+
+func (s *server) SayHello(ctx context.Context, request *proto.GetUserRequest) (*proto.GetUserResponse, error) {
+
+	users := []*proto.User{}
+	user, ok := s.users[request.GetUserId()]
+
+	if ok {
+		users = append(users, user)
+		fmt.Println("Hello ", user.Name)
+	} else {
+		fmt.Println("oh, No one else ", request.UserId)
+	}
+
+	return &proto.GetUserResponse{Message: MsgUserQuerySuccessfully, Users: users}, nil
 }
 
 func (s *server) GetUser(ctx context.Context, request *proto.GetUserRequest) (*proto.GetUserResponse, error) {

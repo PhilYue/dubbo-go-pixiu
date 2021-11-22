@@ -60,10 +60,10 @@ const (
 
 const (
 	StringSeparator      = ","
-	DefaultConfigPath    = "configs/conf.yaml"
+	DefaultConfigPath    = "samples/http/grpc/pixiu/conf.yaml"
 	DefaultApiConfigPath = "configs/api_config.yaml"
-	DefaultLogConfigPath = "configs/log.yml"
-	DefaultLogLevel      = "info"
+	DefaultLogConfigPath = "pkg/logger/log.yml"
+	DefaultLogLevel      = "debug"
 	DefaultLimitCpus     = "0"
 	DefaultLogFormat     = ""
 )

@@ -23,6 +23,7 @@ package provider;
 
 service UserProvider {
     rpc GetUser (GetUserRequest) returns (GetUserResponse);
+    rpc SayHello (GetUserRequest) returns (GetUserResponse);
 }
 
 message GetUserRequest {

@@ -83,6 +83,7 @@ type (
 
 	// Config describe the config of AccessFilter
 	Config struct {
+		DescriptorSourceStrategic string `yaml:"descriptor_source_strategic" json:"descriptor_source_strategic"`
 		Path  string  `yaml:"path" json:"path"`
 		Rules []*Rule `yaml:"rules" json:"rules"` //nolint
 	}
