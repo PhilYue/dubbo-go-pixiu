@@ -222,7 +222,7 @@ func (f *Filter) Handle(c *http.HttpContext) {
 
 	err = jsonToProtoMsg(c.Request.Body, grpcReq)
 	if err != nil && !errors.Is(err, io.EOF) {
-		logger.Errorf("%s err {failed to convert json to proto msg, %s}", loggerHeader, err)
+		logger.Errorf("%s err {failed to convert json to proto msg, %s}", loggerHeader, err.Error())
 		c.Err = err
 		c.Next()
 		return
@@ -390,6 +390,9 @@ func (f *Filter) Apply() error {
 	if err != nil {
 		return err
 	}
+
+	// pi descriptorSource : add file desc
+	GetCmpSource().WithFileDS(&fsrc)
 
 	// pi reflection descriptor init
 	if gc.DescriptorSourceStrategic == "auto" {

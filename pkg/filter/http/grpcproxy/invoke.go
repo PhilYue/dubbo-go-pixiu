@@ -19,6 +19,7 @@ package grpcproxy
 
 import (
 	"context"
+	"fmt"
 )
 
 import (
@@ -43,6 +44,13 @@ func Invoke(ctx context.Context, stub grpcdynamic.Stub, mthDesc *desc.MethodDesc
 	} else if mthDesc.IsServerStreaming() {
 		err = perrors.New("currently not support server side stream")
 	} else {
+		fmt.Printf("=============================mthDesc : %s \n ", mthDesc)
+		fmt.Printf("ctx : %s \n ", ctx)
+		fmt.Printf("stub : %s \n ", stub)
+		fmt.Printf("mtd : %s \n ", mthDesc)
+		fmt.Printf("grpcReq : %s \n ", grpcReq)
+		fmt.Printf("opts : %s \n ", opts)
+		//fmt.Printf("req : %s \n ", req)
 		resp, err = invokeUnary(ctx, stub, mthDesc, grpcReq, opts...)
 	}
 

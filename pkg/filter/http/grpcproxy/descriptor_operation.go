@@ -58,11 +58,6 @@ func (f *Filter) initFromFileDescriptor(importPaths []string, fileNames ...strin
 		fsrc.files[name] = fd
 	}
 
-	// pi descriptorSource : add file desc
-	ds := GetCmpSource().WithFileDS(&fsrc)
-
-	fmt.Printf("%v", ds)
-
 	return nil
 }
 
