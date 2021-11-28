@@ -2,6 +2,7 @@ package grpcproxy
 
 import (
 	"fmt"
+	"github.com/apache/dubbo-go-pixiu/pkg/logger"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/pkg/errors"
@@ -114,6 +115,7 @@ func (cs compositeSource) ListServices() ([]string, error) {
 func (cs compositeSource) FindSymbol(fullyQualifiedName string) (desc.Descriptor, error) {
 	descriptor, err := cs.reflection.FindSymbol(fullyQualifiedName)
 	if err == nil {
+		logger.Debugf("%s find symbol by reflection : %v", loggerHeader, descriptor)
 		return descriptor, nil
 	}
 	return cs.file.FindSymbol(fullyQualifiedName)
