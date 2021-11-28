@@ -43,7 +43,7 @@ static_resources:
                 http_filters:
                   - name: dgp.filter.http.grpcproxy
                     config:
-                      descriptor_source_strategic: local # reflection, auto(->remote->local)  ## default: auto
+                      descriptor_source_strategic: "auto" # reflection, auto(->reflection->file)  ## default: auto
 #                      path: $PROJECT_DIR/proto
                       path: /Users/phil/Meituan/galaxyspace/dubbo-go-pixiu/samples/http/grpc/proto
                   - name: dgp.filter.http.response

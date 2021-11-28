@@ -18,6 +18,7 @@
 package grpcproxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/jhump/protoreflect/grpcreflect"
@@ -43,6 +44,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
 )
 
@@ -141,46 +143,19 @@ var refClient *grpcreflect.Client
 
 // Handle use the default http to grpc transcoding strategy https://cloud.google.com/endpoints/docs/grpc/transcoding
 func (f *Filter) Handle(c *http.HttpContext) {
+
 	svc, mth := getServiceAndMethod(c.GetUrl())
 
-	dscp, err := fsrc.FindSymbol(svc)
-	if err != nil {
-		logger.Errorf("%s err {%s}", loggerHeader, "request path invalid")
-		c.Err = perrors.New("method not allow")
-		c.Next()
-		return
+	reflectionSource := func(refCtx context.Context, cc *grpc.ClientConn) DescriptorSource {
+		refClient = grpcreflect.NewClient(refCtx, reflectpb.NewServerReflectionClient(cc))
+		return GetReflSource(refClient)
 	}
 
-	svcDesc, ok := dscp.(*desc.ServiceDescriptor)
-	if !ok {
-		logger.Errorf("%s err {service not expose, %s}", loggerHeader, svc)
-		c.Err = perrors.New(fmt.Sprintf("service not expose, %s", svc))
-		c.Next()
-		return
-	}
-
-	mthDesc := svcDesc.FindMethodByName(mth)
-
-	err = f.registerExtension(mthDesc)
-	if err != nil {
-		logger.Errorf("%s err {%s}", loggerHeader, "register extension failed")
-		c.Err = err
-		c.Next()
-		return
-	}
-
-	msgFac := dynamic.NewMessageFactoryWithExtensionRegistry(&f.extReg)
-	grpcReq := msgFac.NewMessage(mthDesc.GetInputType())
-
-	err = jsonToProtoMsg(c.Request.Body, grpcReq)
-	if err != nil && !errors.Is(err, io.EOF) {
-		logger.Errorf("%s err {failed to convert json to proto msg, %s}", loggerHeader, err.Error())
-		c.Err = err
-		c.Next()
-		return
-	}
+	// ======================
 
 	var clientConn *grpc.ClientConn
+	var err error
+
 	re := c.GetRouteEntry()
 	logger.Debugf("%s client choose endpoint from cluster :%v", loggerHeader, re.Cluster)
 
@@ -211,6 +186,49 @@ func (f *Filter) Handle(c *http.HttpContext) {
 		}
 	}
 
+	// pi 初始化 reflectServer
+	source := GetCmpSource().WithReflectionDS(reflectionSource(c.Ctx, clientConn))
+
+	dscp, err := source.FindSymbol(svc)
+
+	//dscp, err := fsrc.FindSymbol(svc)
+	if err != nil {
+		logger.Errorf("%s err {%s}", loggerHeader, "request path invalid")
+		c.Err = perrors.New("method not allow")
+		c.Next()
+		return
+	}
+
+	svcDesc, ok := dscp.(*desc.ServiceDescriptor)
+	if !ok {
+		logger.Errorf("%s err {service not expose, %s}", loggerHeader, svc)
+		c.Err = perrors.New(fmt.Sprintf("service not expose, %s", svc))
+		c.Next()
+		return
+	}
+
+	mthDesc := svcDesc.FindMethodByName(mth)
+
+	err = f.registerExtension(mthDesc)
+	if err != nil {
+		logger.Errorf("%s err {%s}", loggerHeader, "register extension failed")
+		c.Err = err
+		c.Next()
+		return
+	}
+
+	msgFac := dynamic.NewMessageFactoryWithExtensionRegistry(&f.extReg)
+	grpcReq := msgFac.NewMessage(mthDesc.GetInputType())
+
+	err = jsonToProtoMsg(c.Request.Body, grpcReq)
+	if err != nil && !errors.Is(err, io.EOF) {
+		logger.Errorf("%s err {failed to convert json to proto msg, %s}", loggerHeader, err)
+		c.Err = err
+		c.Next()
+		return
+	}
+
+
 	stub := grpcdynamic.NewStubWithMessageFactory(clientConn, msgFac)
 
 	// metadata in grpc has the same feature in http
@@ -220,26 +238,10 @@ func (f *Filter) Handle(c *http.HttpContext) {
 	md = metadata.MD{}
 	t := metadata.MD{}
 
-
-	//if reflection {
-	//	//md := grpcurl.MetadataFromHeaders(append(addlHeaders, reflHeaders...))
-	//	//refCtx := metadata.NewOutgoingContext(ctx, md)
-	//	//cc = dial()
-	//	refClient = grpcreflect.NewClient(c.Ctx, reflectpb.NewServerReflectionClient(clientConn))
-	//	reflSource := grpcurl.DescriptorSourceFromServer(ctx, refClient)
-	//	if fileSource != nil {
-	//		descSource = compositeSource{reflSource, fileSource}
-	//	} else {
-	//		descSource = reflSource
-	//	}
-	//} else {
-	//	descSource = fileSource
-	//}
-
 	resp, err := Invoke(ctx, stub, mthDesc, grpcReq, grpc.Header(&md), grpc.Trailer(&t))
 	// judge err is server side error or not
 	if st, ok := status.FromError(err); !ok || isServerError(st) {
-		logger.Error("%s err {failed to invoke grpc service provider, %s}", loggerHeader, err.Error())
+		logger.Errorf("%s err {failed to invoke grpc service provider, %s}", loggerHeader, err.Error())
 		c.Err = err
 		c.Next()
 		return
@@ -247,7 +249,7 @@ func (f *Filter) Handle(c *http.HttpContext) {
 
 	res, err := protoMsgToJson(resp)
 	if err != nil {
-		logger.Error("%s err {failed to convert proto msg to json, %s}", loggerHeader, err.Error())
+		logger.Errorf("%s err {failed to convert proto msg to json, %s}", loggerHeader, err.Error())
 		c.Err = err
 		c.Next()
 		return
@@ -383,9 +385,17 @@ func (f *Filter) Apply() error {
 	if err != nil {
 		return err
 	}
+	// pi file descriptor
 	err = f.initFromFileDescriptor([]string{gc.Path}, fileLists...)
 	if err != nil {
 		return err
 	}
+
+	// pi reflection descriptor init
+	if gc.DescriptorSourceStrategic == "auto" {
+		//f.initRe
+		logger.Infof("init reflection descriptor ...")
+	}
+
 	return nil
 }
