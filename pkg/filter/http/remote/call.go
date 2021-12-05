@@ -149,7 +149,7 @@ func (f *Filter) Handle(c *contexthttp.HttpContext) {
 }
 
 func matchClient(typ apiConf.RequestType) (client.Client, error) {
-	switch strings.ToLower(string(typ)) {
+	tch strings.ToLower(string(typ)) {
 	case string(apiConf.DubboRequest):
 		return dubbo.SingletonDubboClient(), nil
 	// todo @(laurence) add triple to apiConf

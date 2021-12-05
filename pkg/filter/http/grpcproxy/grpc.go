@@ -23,8 +23,6 @@ import (
 	"io"
 	"io/ioutil"
 	stdHttp "net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -75,6 +73,7 @@ type (
 
 	// Filter is grpc filter instance
 	Filter struct {
+		Descriptor
 		cfg *Config
 		// hold grpc.ClientConns, key format: cluster name + "." + endpoint
 		pools map[string]*sync.Pool
@@ -85,6 +84,7 @@ type (
 
 	// Config describe the config of AccessFilter
 	Config struct {
+		DescriptorSourceStrategy string `yaml:"descriptor_source_strategy" json:"descriptor_source_strategy"`
 		Path  string  `yaml:"path" json:"path"`
 		Rules []*Rule `yaml:"rules" json:"rules"` //nolint
 	}
@@ -133,9 +133,46 @@ func getServiceAndMethod(path string) (string, string) {
 
 // Handle use the default http to grpc transcoding strategy https://cloud.google.com/endpoints/docs/grpc/transcoding
 func (f *Filter) Handle(c *http.HttpContext) {
+
 	svc, mth := getServiceAndMethod(c.GetUrl())
 
-	dscp, err := fsrc.FindSymbol(svc)
+	var clientConn *grpc.ClientConn
+	var err error
+
+	re := c.GetRouteEntry()
+	logger.Debugf("%s client choose endpoint from cluster :%v", loggerHeader, re.Cluster)
+
+	e := server.GetClusterManager().PickEndpoint(re.Cluster)
+	if e == nil {
+		logger.Errorf("%s err {cluster not exists}", loggerHeader)
+		c.Err = perrors.New("cluster not exists")
+		c.Next()
+		return
+	}
+
+	ep := e.Address.GetAddress()
+
+	p, ok := f.pools[strings.Join([]string{re.Cluster, ep}, ".")]
+	if !ok {
+		p = &sync.Pool{}
+	}
+
+	clientConn, ok = p.Get().(*grpc.ClientConn)
+	if !ok || clientConn == nil {
+		// TODO(Kenway): Support Credential and TLS
+		clientConn, err = grpc.DialContext(c.Ctx, ep, grpc.WithInsecure())
+		if err != nil || clientConn == nil {
+			logger.Errorf("%s err {failed to connect to grpc service provider}", loggerHeader)
+			c.Err = err
+			c.Next()
+			return
+		}
+	}
+
+	// pi to be simple
+	source := f.GetDescriptor(f.cfg, c.Ctx, clientConn)
+
+	dscp, err := source.FindSymbol(svc)
 	if err != nil {
 		logger.Errorf("%s err {%s}", loggerHeader, "request path invalid")
 		c.Err = perrors.New("method not allow")
@@ -170,37 +207,6 @@ func (f *Filter) Handle(c *http.HttpContext) {
 		c.Err = err
 		c.Next()
 		return
-	}
-
-	var clientConn *grpc.ClientConn
-	re := c.GetRouteEntry()
-	logger.Debugf("%s client choose endpoint from cluster :%v", loggerHeader, re.Cluster)
-
-	e := server.GetClusterManager().PickEndpoint(re.Cluster)
-	if e == nil {
-		logger.Errorf("%s err {cluster not exists}", loggerHeader)
-		c.Err = perrors.New("cluster not exists")
-		c.Next()
-		return
-	}
-
-	ep := e.Address.GetAddress()
-
-	p, ok := f.pools[strings.Join([]string{re.Cluster, ep}, ".")]
-	if !ok {
-		p = &sync.Pool{}
-	}
-
-	clientConn, ok = p.Get().(*grpc.ClientConn)
-	if !ok || clientConn == nil {
-		// TODO(Kenway): Support Credential and TLS
-		clientConn, err = grpc.DialContext(c.Ctx, ep, grpc.WithInsecure())
-		if err != nil || clientConn == nil {
-			logger.Errorf("%s err {failed to connect to grpc service provider}", loggerHeader)
-			c.Err = err
-			c.Next()
-			return
-		}
 	}
 
 	stub := grpcdynamic.NewStubWithMessageFactory(clientConn, msgFac)
@@ -328,40 +334,9 @@ func (f *Filter) Config() interface{} {
 }
 
 func (f *Filter) Apply() error {
-	gc := f.cfg
 
-	cur := gc.Path
-	if !filepath.IsAbs(cur) {
-		ex, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		cur = filepath.Dir(ex) + string(os.PathSeparator) + gc.Path
-	}
+	f.initDescriptorSource(f.cfg)
 
-	logger.Infof("%s load proto files from %s", loggerHeader, cur)
-	fileLists := make([]string, 0)
-	items, err := ioutil.ReadDir(cur)
-	if err != nil {
-		return err
-	}
-
-	for _, item := range items {
-		if !item.IsDir() {
-			sp := strings.Split(item.Name(), ".")
-			length := len(sp)
-			if length >= 2 && sp[length-1] == "proto" {
-				fileLists = append(fileLists, item.Name())
-			}
-		}
-	}
-
-	if err != nil {
-		return err
-	}
-	err = f.initFromFileDescriptor([]string{gc.Path}, fileLists...)
-	if err != nil {
-		return err
-	}
 	return nil
 }
+
