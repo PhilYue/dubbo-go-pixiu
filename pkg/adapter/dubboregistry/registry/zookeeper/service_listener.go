@@ -24,7 +24,7 @@ import (
 )
 
 import (
-	"github.com/apache/dubbo-go/common"
+	"dubbo.apache.org/dubbo-go/v3/common"
 
 	"github.com/dubbogo/dubbo-go-pixiu-filter/pkg/api/config"
 
@@ -51,6 +51,7 @@ type serviceListener struct {
 	wg              sync.WaitGroup
 	adapterListener common2.RegistryEventListener
 	registryMethod  map[string]*config.Method
+	mutex           sync.Mutex
 }
 
 // newZkSrvListener creates a new zk service listener
@@ -166,6 +167,8 @@ func (zkl *serviceListener) handleEvent() {
 		},
 	}
 	apiPattern := registry.GetAPIPattern(bkConfig)
+	zkl.mutex.Lock()
+	defer zkl.mutex.Unlock()
 	for i := range methods {
 		api := registry.CreateAPIConfig(apiPattern, location, bkConfig, methods[i], mappingParams)
 		key := api.URLPattern + ":" + string(api.Method.HTTPVerb)
