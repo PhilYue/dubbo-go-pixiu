@@ -20,9 +20,10 @@ package model
 // RemoteConfig remote server info which offer server discovery or k/v or distribution function
 type RemoteConfig struct {
 	Protocol string `yaml:"protocol" json:"protocol" default:"zookeeper"`
-	Timeout  string `yaml:"timeout" json:"timeout"`
+	Timeout  string `yaml:"timeout" json:"timeout" default:"10s"`
 	Address  string `yaml:"address" json:"address"`
 	Username string `yaml:"username" json:"username"`
 	Password string `yaml:"password" json:"password"`
 	Group    string `yaml:"group" json:"group"`
+	Root     string `yaml:"root" json:"root" default:"/services"`
 }

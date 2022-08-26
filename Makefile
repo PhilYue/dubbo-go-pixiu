@@ -59,14 +59,17 @@ license-check:
 
 image:
 	@docker build \
-		-t apache/$(targetName):latest \
-		-t apache/$(targetName):$(VERSION) \
+		-t dubbogopixiu/$(targetName):latest \
+		-t dubbogopixiu/$(targetName):$(VERSION) \
 		--build-arg build=$(BUILD) --build-arg version=$(VERSION) \
-		-f Dockerfile --no-cache .
+		-f Dockerfile --no-cache --platform linux/amd64 .
 
 test:
 	sh before_ut.sh
-	go test ./pkg/... -coverprofile=coverage.txt -covermode=atomic
+	go test ./pkg/...  -gcflags=-l -coverprofile=coverage.txt -covermode=atomic
 
 integrate-test:
 	sh start_integrate_test.sh
+
+clean:
+	@rm -rf ./dubbo-go-pixiu

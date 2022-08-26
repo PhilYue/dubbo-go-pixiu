@@ -17,12 +17,10 @@
 
 package model
 
-import (
-	"math/rand"
-)
+import "github.com/dubbogo/gost/hash/consistent"
 
 const (
-	Static DiscoveryType = 0 + iota
+	Static DiscoveryType = iota
 	StrictDNS
 	LogicalDns
 	EDS
@@ -31,51 +29,56 @@ const (
 
 var (
 	// DiscoveryTypeName
-	DiscoveryTypeName = map[int32]string{
-		0: "Static",
-		1: "StrictDNS",
-		2: "LogicalDns",
-		3: "EDS",
-		4: "OriginalDst",
+	DiscoveryTypeName = map[DiscoveryType]string{
+		Static:      "Static",
+		StrictDNS:   "StrictDNS",
+		LogicalDns:  "LogicalDns",
+		EDS:         "EDS",
+		OriginalDst: "OriginalDst",
 	}
 
 	// DiscoveryTypeValue
-	DiscoveryTypeValue = map[string]int32{
-		"Static":      0,
-		"StrictDNS":   1,
-		"LogicalDns":  2,
-		"EDS":         3,
-		"OriginalDst": 4,
+	DiscoveryTypeValue = map[string]DiscoveryType{
+		"Static":      Static,
+		"StrictDNS":   StrictDNS,
+		"LogicalDns":  LogicalDns,
+		"EDS":         EDS,
+		"OriginalDst": OriginalDst,
 	}
 )
 
 type (
-	// Cluster a single upstream cluster
-	Cluster struct {
-		Name                 string           `yaml:"name" json:"name"` // Name the cluster unique name
-		TypeStr              string           `yaml:"type" json:"type"` // Type the cluster discovery type string value
-		Type                 DiscoveryType    `yaml:"-" json:"-"`       // Type the cluster discovery type
-		EdsClusterConfig     EdsClusterConfig `yaml:"eds_cluster_config" json:"eds_cluster_config" mapstructure:"eds_cluster_config"`
-		LbStr                string           `yaml:"lb_policy" json:"lb_policy"`   // Lb the cluster select node used loadBalance policy
-		Lb                   LbPolicy         `yaml:",omitempty" json:",omitempty"` // Lb the cluster select node used loadBalance policy
-		HealthChecks         []HealthCheck    `yaml:"health_checks" json:"health_checks"`
-		Endpoints            []*Endpoint      `yaml:"endpoints" json:"endpoints"`
-		prePickEndpointIndex int
+	// ClusterConfig a single upstream cluster
+	ClusterConfig struct {
+		Name                 string              `yaml:"name" json:"name"` // Name the cluster unique name
+		TypeStr              string              `yaml:"type" json:"type"` // Type the cluster discovery type string value
+		Type                 DiscoveryType       `yaml:"-" json:"-"`       // Type the cluster discovery type
+		EdsClusterConfig     EdsClusterConfig    `yaml:"eds_cluster_config" json:"eds_cluster_config" mapstructure:"eds_cluster_config"`
+		LbStr                LbPolicyType        `yaml:"lb_policy" json:"lb_policy"`   // Lb the cluster select node used loadBalance policy
+		Hash                 Hash                `yaml:"consistent" json:"consistent"` // Consistent hash config info
+		HealthChecks         []HealthCheckConfig `yaml:"health_checks" json:"health_checks"`
+		Endpoints            []*Endpoint         `yaml:"endpoints" json:"endpoints"`
+		PrePickEndpointIndex int
 	}
 
-	// EdsClusterConfig
+	// EdsClusterConfig todo remove un-used EdsClusterConfig
 	EdsClusterConfig struct {
 		EdsConfig   ConfigSource `yaml:"eds_config" json:"eds_config" mapstructure:"eds_config"`
 		ServiceName string       `yaml:"service_name" json:"service_name" mapstructure:"service_name"`
 	}
 
 	// Registry remote registry where dubbo apis are registered.
+	// Here comes a problem, dubbo protocol proxy does not use the same registry as pixiu,
+	// so any modification to the config, should apply to both `pkg/client/dubbo/dubbo.go`
+	// and `pkg\adapter\dubboregistry\registry`
 	Registry struct {
-		Protocol string `default:"zookeeper" yaml:"protocol" json:"protocol"`
-		Timeout  string `yaml:"timeout" json:"timeout"`
-		Address  string `yaml:"address" json:"address"`
-		Username string `yaml:"username" json:"username"`
-		Password string `yaml:"password" json:"password"`
+		Protocol  string `default:"zookeeper" yaml:"protocol" json:"protocol"`
+		Timeout   string `yaml:"timeout" json:"timeout"`
+		Address   string `yaml:"address" json:"address"`
+		Username  string `yaml:"username" json:"username"`
+		Password  string `yaml:"password" json:"password"`
+		Group     string `default:"DEFAULT_GROUP"  yaml:"group" json:"group"`
+		Namespace string `yaml:"namespace" json:"namespace"`
 	}
 
 	// DiscoveryType
@@ -83,36 +86,38 @@ type (
 
 	// Endpoint
 	Endpoint struct {
-		ID      string        `yaml:"ID" json:"ID"`     // ID indicate one endpoint
-		Name    string        `yaml:"name" json:"name"` // Name the cluster unique name
-		Address SocketAddress `yaml:"socket_address" json:"socket_address" mapstructure:"socket_address"`
-		// extra info such as label or other meta data
-		Metadata map[string]string `yaml:"meta" json:"meta"`
+		ID        string            `yaml:"ID" json:"ID"`                                                       // ID indicate one endpoint
+		Name      string            `yaml:"name" json:"name"`                                                   // Name the cluster unique name
+		Address   SocketAddress     `yaml:"socket_address" json:"socket_address" mapstructure:"socket_address"` // Address socket address
+		Metadata  map[string]string `yaml:"meta" json:"meta"`                                                   // Metadata extra info such as label or other meta data
+		UnHealthy bool
+	}
+
+	Hash struct {
+		ReplicaNum     int   `yaml:"replica_num" json:"replica_num"`
+		MaxVnodeNum    int32 `yaml:"max_vnode_num" json:"max_vnode_num"`
+		ConsistentHash *consistent.Consistent
 	}
 )
 
-func (c *Cluster) PickOneEndpoint() *Endpoint {
-	// TODO: add lb strategy abstraction
-	if c.Endpoints == nil || len(c.Endpoints) == 0 {
-		return nil
-	}
-
-	if len(c.Endpoints) == 1 {
-		return c.Endpoints[0]
-	}
-
-	if c.Lb == Rand {
-		return c.Endpoints[rand.Intn(len(c.Endpoints))]
-	} else if c.Lb == RoundRobin {
-
-		lens := len(c.Endpoints)
-		if c.prePickEndpointIndex >= lens {
-			c.prePickEndpointIndex = 0
+func (c *ClusterConfig) GetEndpoint(mustHealth bool) []*Endpoint {
+	var endpoints []*Endpoint
+	for _, e := range c.Endpoints {
+		// select all endpoint or endpoint is health
+		if !mustHealth || !e.UnHealthy {
+			endpoints = append(endpoints, e)
 		}
-		e := c.Endpoints[c.prePickEndpointIndex]
-		c.prePickEndpointIndex = (c.prePickEndpointIndex + 1) % lens
-		return e
-	} else {
-		return c.Endpoints[rand.Intn(len(c.Endpoints))]
+	}
+	return endpoints
+}
+
+func (c *ClusterConfig) CreateConsistentHash() {
+	if c.LbStr == LoadBalanceConsistentHashing {
+		h := consistent.NewConsistentHash(consistent.WithReplicaNum(c.Hash.ReplicaNum),
+			consistent.WithMaxVnodeNum(int(c.Hash.MaxVnodeNum)))
+		for _, endpoint := range c.Endpoints {
+			h.Add(endpoint.Address.Address)
+		}
+		c.Hash.ConsistentHash = h
 	}
 }

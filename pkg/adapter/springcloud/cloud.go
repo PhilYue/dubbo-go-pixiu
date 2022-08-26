@@ -18,6 +18,7 @@
 package springcloud
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,7 @@ import (
 import (
 	"github.com/apache/dubbo-go-pixiu/pkg/adapter/springcloud/servicediscovery"
 	"github.com/apache/dubbo-go-pixiu/pkg/adapter/springcloud/servicediscovery/nacos"
+	"github.com/apache/dubbo-go-pixiu/pkg/adapter/springcloud/servicediscovery/zookeeper"
 	"github.com/apache/dubbo-go-pixiu/pkg/common/constant"
 	"github.com/apache/dubbo-go-pixiu/pkg/common/extension/adapter"
 	"github.com/apache/dubbo-go-pixiu/pkg/logger"
@@ -39,6 +41,9 @@ import (
 const (
 	// Kind is the kind of Adapter Plugin.
 	Kind = constant.SpringCloudAdapter
+
+	Nacos     = "nacos"
+	Zookeeper = "zookeeper"
 )
 
 func init() {
@@ -67,12 +72,27 @@ type (
 		Registry      *model.RemoteConfig `yaml:"registry" json:"registry" default:"registry"`
 		FreshInterval time.Duration       `yaml:"freshInterval" json:"freshInterval" default:"freshInterval"`
 		Services      []string            `yaml:"services" json:"services" default:"services"`
+		// SubscribePolicy subscribe config,
+		// - adapting : if there is no any Services (App) names, fetch All services from registry center
+		// - definitely : fetch services by the config Services (App) names
+		SubscribePolicy string `yaml:"subscribe-policy" json:"subscribe-policy" default:"adapting"`
 	}
 
 	Service struct {
 		Name string
 	}
+
+	SubscribePolicy int
 )
+
+const (
+	Adapting SubscribePolicy = iota
+	Definitely
+)
+
+func (sp SubscribePolicy) String() string {
+	return [...]string{"adapting", "definitely"}[sp]
+}
 
 // Kind return plugin kind
 func (p *CloudPlugin) Kind() string {
@@ -86,26 +106,24 @@ func (p *CloudPlugin) CreateAdapter(ad *model.Adapter) (adapter.Adapter, error) 
 
 // Start start the adapter
 func (a *CloudAdapter) Start() {
+
 	// do not block the main goroutine
 	// init get all service instance
 	err := a.firstFetch()
 	if err != nil {
 		logger.Errorf("init fetch service fail", err.Error())
-		return
 	}
 
 	// background sync service instance from remote
 	err = a.backgroundSyncPeriod()
 	if err != nil {
 		logger.Errorf("init periodicity fetch service task fail", err.Error())
-		return
 	}
 
 	// watch then fetch is more safety for consistent but there is background fresh mechanism
 	err = a.watch()
 	if err != nil {
 		logger.Errorf("init watch the register fail", err.Error())
-		return
 	}
 }
 
@@ -121,19 +139,23 @@ func (a *CloudAdapter) Stop() {
 // Apply init
 func (a *CloudAdapter) Apply() error {
 	//registryUsed := ad.Config["registry"].(map[string]interface{})
-	switch a.cfg.Registry.Protocol {
-	case "nacos":
-		sd, err := nacos.NewNacosServiceDiscovery(a.cfg.Services, a.cfg.Registry, a)
-		if err != nil {
-			logger.Errorf("Apply NewNacosServiceDiscovery", err.Error())
-			return err
-		}
-		a.sd = sd
-	case "consul":
-	case "zookeeper":
+	var (
+		sd  servicediscovery.ServiceDiscovery
+		err error
+	)
+	switch strings.ToLower(a.cfg.Registry.Protocol) {
+	case Nacos:
+		sd, err = nacos.NewNacosServiceDiscovery(a.cfg.Services, a.cfg.Registry, a)
+	case Zookeeper:
+		sd, err = zookeeper.NewZKServiceDiscovery(a.cfg.Services, a.cfg.Registry, a)
 	default:
 		return errors.New("adapter init error registry not recognise")
 	}
+	if err != nil {
+		logger.Errorf("Apply NewServiceDiscovery %s ", a.cfg.Registry.Protocol, err.Error())
+		return err
+	}
+	a.sd = sd
 	return nil
 }
 
@@ -195,10 +217,18 @@ func (a *CloudAdapter) fetchServiceByConfig() ([]servicediscovery.ServiceInstanc
 	var instances []servicediscovery.ServiceInstance
 	var err error
 	// if configure specific services, then fetch those service instance only
-	if len(a.cfg.Services) > 0 {
-		instances, err = a.sd.QueryServicesByName(a.cfg.Services)
+	if a.subscribeServiceDefinitely() {
+		if len(a.cfg.Services) > 0 {
+			instances, err = a.sd.QueryServicesByName(a.cfg.Services)
+		} else {
+			logger.Warnf("No any Service(App) need Subscribe, config the Service(App) Names or make the `subscribe-policy: adapting` pls.")
+		}
 	} else {
-		instances, err = a.sd.QueryAllServices()
+		if len(a.cfg.Services) > 0 {
+			instances, err = a.sd.QueryServicesByName(a.cfg.Services)
+		} else {
+			instances, err = a.sd.QueryAllServices()
+		}
 	}
 
 	if err != nil {
@@ -257,6 +287,7 @@ func (a *CloudAdapter) fetchCompareAndSet() {
 		logger.Warnf("fetchCompareAndSet all service error ", err.Error())
 		return
 	}
+	_ = a.watch()
 	// manage cluster and route
 	cm := server.GetClusterManager()
 	rm := server.GetRouterManager()
@@ -282,8 +313,7 @@ func (a *CloudAdapter) fetchCompareAndSet() {
 	// first remove the router for removed cluster
 	for _, c := range oldStore.Config {
 		if !newStore.HasCluster(c.Name) {
-			delete := &model.Router{ID: c.Name}
-			rm.DeleteRouter(delete)
+			rm.DeleteRouter(&model.Router{ID: c.Name})
 		}
 	}
 	// second set cluster
@@ -297,8 +327,7 @@ func (a *CloudAdapter) fetchCompareAndSet() {
 	// third add new router
 	for _, c := range newStore.Config {
 		if !oldStore.HasCluster(c.Name) {
-			prefix := "/" + c.Name + "/"
-			match := model.RouterMatch{Prefix: prefix}
+			match := model.NewRouterMatchPrefix(c.Name)
 			route := model.RouteAction{Cluster: c.Name}
 			added := &model.Router{ID: c.Name, Match: match, Route: route}
 			rm.AddRouter(added)
@@ -307,6 +336,9 @@ func (a *CloudAdapter) fetchCompareAndSet() {
 }
 
 func (a *CloudAdapter) backgroundSyncPeriod() error {
+	if a.cfg.FreshInterval <= 0 {
+		return nil
+	}
 	timer := time.NewTicker(a.cfg.FreshInterval)
 	go func() {
 		defer timer.Stop()
@@ -332,8 +364,11 @@ func (a *CloudAdapter) stop() error {
 	err := a.sd.Unsubscribe()
 	if err != nil {
 		logger.Errorf("unsubscribe registry fail ", err.Error())
-		//return err
 	}
 	close(a.stopChan)
 	return nil
+}
+
+func (a *CloudAdapter) subscribeServiceDefinitely() bool {
+	return strings.EqualFold(a.cfg.SubscribePolicy, Definitely.String())
 }

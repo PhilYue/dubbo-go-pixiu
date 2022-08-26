@@ -28,6 +28,7 @@ import (
 	"github.com/apache/dubbo-go-pixiu/pkg/config"
 	"github.com/apache/dubbo-go-pixiu/pkg/logger"
 	"github.com/apache/dubbo-go-pixiu/pkg/model"
+	"github.com/apache/dubbo-go-pixiu/pkg/tracing"
 )
 
 var server *Server
@@ -40,8 +41,10 @@ type Server struct {
 	clusterManager  *ClusterManager
 	adapterManager  *AdapterManager
 	// routerManager and apiConfigManager are duplicate, because route and dubbo-protocol api_config  are a bit repetitive
-	routerManager    *RouterManager
-	apiConfigManager *ApiConfigManager
+	routerManager         *RouterManager
+	apiConfigManager      *ApiConfigManager
+	dynamicResourceManger DynamicResourceManager
+	traceDriverManager    *tracing.TraceDriverManager
 }
 
 func (s *Server) initialize(bs *model.Bootstrap) {
@@ -50,6 +53,8 @@ func (s *Server) initialize(bs *model.Bootstrap) {
 	s.apiConfigManager = CreateDefaultApiConfigManager(s, bs)
 	s.adapterManager = CreateDefaultAdapterManager(s, bs)
 	s.listenerManager = CreateDefaultListenerManager(bs)
+	s.dynamicResourceManger = createDynamicResourceManger(bs)
+	s.traceDriverManager = tracing.CreateDefaultTraceDriverManager(bs)
 }
 
 func (s *Server) GetClusterManager() *ClusterManager {
@@ -66,6 +71,14 @@ func (s *Server) GetRouterManager() *RouterManager {
 
 func (s *Server) GetApiConfigManager() *ApiConfigManager {
 	return s.apiConfigManager
+}
+
+func (s *Server) GetDynamicResourceManager() DynamicResourceManager {
+	return s.dynamicResourceManger
+}
+
+func (s *Server) GetTraceDriverManager() *tracing.TraceDriverManager {
+	return s.traceDriverManager
 }
 
 // Start server start
@@ -93,7 +106,13 @@ func (s *Server) Start() {
 		if addr.Port == 0 {
 			addr.Port = constant.PprofDefaultPort
 		}
-		go http.ListenAndServe(addr.Address+":"+strconv.Itoa(addr.Port), nil)
+		go func() {
+			err := http.ListenAndServe(addr.Address+":"+strconv.Itoa(addr.Port), nil)
+			if err != nil {
+				logger.Warnf("Pprof server start failed, err: %v", err)
+				return
+			}
+		}()
 		logger.Infof("[dubbopixiu go pprof] httpListener start by : %s", addr.Address+":"+strconv.Itoa(addr.Port))
 	}
 }
@@ -128,4 +147,12 @@ func GetRouterManager() *RouterManager {
 
 func GetApiConfigManager() *ApiConfigManager {
 	return server.GetApiConfigManager()
+}
+
+func GetDynamicResourceManager() DynamicResourceManager {
+	return server.GetDynamicResourceManager()
+}
+
+func GetTraceDriverManager() *tracing.TraceDriverManager {
+	return server.traceDriverManager
 }

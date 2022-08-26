@@ -19,9 +19,17 @@ package model
 
 // Bootstrap the door
 type Bootstrap struct {
-	StaticResources  StaticResources  `yaml:"static_resources" json:"static_resources" mapstructure:"static_resources"`
-	DynamicResources DynamicResources `yaml:"dynamic_resources" json:"dynamic_resources" mapstructure:"dynamic_resources"`
-	Metric           Metric           `yaml:"metric" json:"metric" mapstructure:"metric"`
+	StaticResources  StaticResources   `yaml:"static_resources" json:"static_resources" mapstructure:"static_resources"`
+	DynamicResources *DynamicResources `yaml:"dynamic_resources" json:"dynamic_resources" mapstructure:"dynamic_resources"`
+	Metric           Metric            `yaml:"metric" json:"metric" mapstructure:"metric"`
+	Node             *Node             `yaml:"node" json:"node" mapstructure:"node"`
+	Trace            *TracerConfig     `yaml:"tracing" json:"tracing" mapstructure:"tracing"`
+}
+
+// Node node info for dynamic identifier
+type Node struct {
+	Cluster string `yaml:"cluster" json:"cluster" mapstructure:"cluster"`
+	Id      string `yaml:"id" json:"id" mapstructure:"id"`
 }
 
 // GetListeners
@@ -53,15 +61,23 @@ func (bs *Bootstrap) ExistCluster(name string) bool {
 
 // StaticResources
 type StaticResources struct {
-	Listeners      []*Listener     `yaml:"listeners" json:"listeners" mapstructure:"listeners"`
-	Clusters       []*Cluster      `yaml:"clusters" json:"clusters" mapstructure:"clusters"`
-	Adapters       []*Adapter      `yaml:"adapters" json:"adapters" mapstructure:"adapters"`
-	ShutdownConfig *ShutdownConfig `yaml:"shutdown_config" json:"shutdown_config" mapstructure:"shutdown_config"`
-	PprofConf      PprofConf       `yaml:"pprofConf" json:"pprofConf" mapstructure:"pprofConf"`
+	Listeners      []*Listener      `yaml:"listeners" json:"listeners" mapstructure:"listeners"`
+	Clusters       []*ClusterConfig `yaml:"clusters" json:"clusters" mapstructure:"clusters"`
+	Adapters       []*Adapter       `yaml:"adapters" json:"adapters" mapstructure:"adapters"`
+	ShutdownConfig *ShutdownConfig  `yaml:"shutdown_config" json:"shutdown_config" mapstructure:"shutdown_config"`
+	PprofConf      PprofConf        `yaml:"pprofConf" json:"pprofConf" mapstructure:"pprofConf"`
 }
 
-// DynamicResources TODO
-type DynamicResources struct{}
+// DynamicResources config the dynamic resource source
+//	"lds_config": "{...}", # config lister load source
+//	"cds_config": "{...}", # config cluster load source
+//	"ads_config": "{...}"
+//  "ada_config": "{...}" # config adaptor load source
+type DynamicResources struct {
+	LdsConfig *ApiConfigSource `yaml:"lds_config" json:"lds_config" mapstructure:"lds_config"`
+	CdsConfig *ApiConfigSource `yaml:"cds_config" json:"cds_config" mapstructure:"cds_config"`
+	AdsConfig *ApiConfigSource `yaml:"ads_config" json:"ads_config" mapstructure:"ads_config"`
+}
 
 // ShutdownConfig how to shutdown server.
 type ShutdownConfig struct {
