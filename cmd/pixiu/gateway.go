@@ -26,15 +26,13 @@ import (
 )
 
 import (
-	"github.com/apache/dubbo-go-pixiu/pkg/common/constant"
-	"github.com/apache/dubbo-go-pixiu/pkg/logger"
-	"github.com/apache/dubbo-go-pixiu/pkg/server"
+	"github.com/apache/dubbo-go-pixiu/pixiu/pkg/common/constant"
 )
 
 var (
 	gatewayCmd = &cobra.Command{
 		Use:   "gateway",
-		Short: "Run dubbo go server in gateway mode",
+		Short: "Run dubbo go pixiu in gateway mode",
 	}
 
 	startGatewayCmd = &cobra.Command{
@@ -43,28 +41,18 @@ var (
 		Version: Version,
 		PreRun: func(cmd *cobra.Command, args []string) {
 			initDefaultValue()
+
+			err := deploy.initialize()
+			if err != nil {
+				panic(err)
+			}
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			err := initLog()
-			if err != nil {
-				logger.Warnf("[startGatewayCmd] failed to init logger, %s", err.Error())
-			}
 
-			bootstrap, meta, err := initApiConfig()
+			err := deploy.start()
 			if err != nil {
-				if meta {
-					logger.Warnf("[startGatewayCmd] failed to get api meta config, %s", err.Error())
-				} else {
-					logger.Errorf("[startGatewayCmd] failed to get api meta config, %s", err.Error())
-				}
+				panic(err)
 			}
-
-			err = initLimitCpus()
-			if err != nil {
-				logger.Errorf("[startCmd] failed to get limit cpu number, %s", err.Error())
-			}
-
-			server.Start(bootstrap)
 		},
 	}
 )
